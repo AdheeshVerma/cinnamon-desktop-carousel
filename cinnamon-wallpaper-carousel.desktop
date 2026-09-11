@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Wallpaper Carousel
+Comment=Choose a Cinnamon desktop wallpaper
+Exec=wallpaper-carousel
+Icon=preferences-desktop-wallpaper
+Terminal=false
+Categories=GTK;Utility;Settings;
+Keywords=wallpaper;background;cinnamon;
