@@ -43,6 +43,16 @@ This removes only this app's code, launcher, settings, history, favorites, and t
 
 ## Controls
 
-`Left`/`Right` navigate, `Enter` applies, `Esc` closes, `R` chooses randomly, `F` favorites, and `Home`/`End` jump. Mouse arrows, thumbnails, mouse wheel, and a double-click on the main image work as expected. Search filters names; filters cover All, Favorites, and recently applied wallpapers.
+`Left`/`Right` navigate, `Enter` applies, `Esc` closes, `R` chooses a random preview, `F` favorites, and `Home`/`End` jump. **Random + Apply** selects a random wallpaper from the current search/filter results and immediately makes it the Cinnamon desktop background. Mouse arrows, thumbnails, mouse wheel, and a double-click on the main image work as expected. Search filters names; filters cover All, Favorites, recently applied wallpapers, and broad dominant-color families (including light, dark, and neutral).
+
+## Bind a key to launch it
+
+Use Cinnamon's per-user desktop shortcut: **System Settings → Keyboard → Shortcuts → Custom Shortcuts → Add custom shortcut**. After running the optional installer, use this command:
+
+```sh
+~/.local/bin/wallpaper-carousel
+```
+
+Assign a key combination there. This is deliberately a Cinnamon setting rather than app code: it is global, persists independently of source changes, and launches the picker from any application.
 
 Performance presets cap the in-memory thumbnail/display-image caches (Low: 20/2, Balanced: 36/3, High: 60/5). The app avoids visual effects; its optional 200ms slide uses GTK3's stack transition rather than a timer-driven animation engine.

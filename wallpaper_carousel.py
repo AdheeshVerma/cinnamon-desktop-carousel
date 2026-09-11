@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import random
+import colorsys
 from collections import OrderedDict
 from pathlib import Path
 
@@ -22,14 +23,16 @@ DEFAULTS = {"folders": [str(Path.home() / "Pictures" / "Wallpapers")], "thumbnai
             "remember_position": True, "performance": "Balanced", "last_path": ""}
 
 CSS = b"""
-window { background: #161a22; color: #e9edf4; }
-headerbar { background: #202634; border-bottom: 1px solid #30394b; }
-.muted { color: #aeb8c8; } .title { font-size: 18px; font-weight: bold; }
-button { background: #293142; color: #e9edf4; border: 0; border-radius: 8px; padding: 7px 11px; }
-button:hover { background: #39455d; } button.suggested-action { background: #6d7cce; }
-entry, combobox button { background: #222a38; color: #e9edf4; border-color: #3b465d; }
-.card { background: #202634; border-radius: 14px; padding: 10px; }
-.image-frame { background: #0e1118; border-radius: 10px; }
+window { background: #101216; color: #f3f5f8; }
+headerbar { background: #161a20; border-bottom: 1px solid #2b313b; }
+.muted { color: #9ca6b7; } .title { font-size: 18px; font-weight: bold; }
+button { background: #242a33; color: #f3f5f8; border: 1px solid #363e4a; border-radius: 9px; padding: 7px 11px; }
+button:hover { background: #303946; } button.suggested-action { background: #d99a32; color: #17120a; border-color: #efb652; }
+entry, combobox button { background: #1a1f27; color: #f3f5f8; border-color: #363e4a; }
+.image-frame { background: #080a0d; border: 1px solid #2b313b; border-radius: 14px; }
+.thumb-rail { background: #161a20; border-radius: 12px; padding: 6px; }
+.thumb-rail button { min-width: 70px; min-height: 52px; padding: 2px; border-radius: 7px; }
+.selected-thumb { border: 2px solid #e7a63b; }
 """
 
 def read_json(name, default):
@@ -56,6 +59,7 @@ class App(Gtk.Application):
         self.history = read_json("history.json", [])
         self.all_files, self.files, self.index, self.slide_direction = [], [], 0, 0
         self.full_cache = OrderedDict(); self.thumb_cache = OrderedDict()
+        self.color_cache = read_json("colors.json", {})
         self.scan_queue = []; self.scan_id = 0
 
     def do_activate(self):
@@ -66,7 +70,7 @@ class App(Gtk.Application):
 
     def build_ui(self):
         self.win = Gtk.ApplicationWindow(application=self, title="Wallpapers")
-        self.win.set_default_size(900, 620); self.win.set_size_request(620, 480)
+        self.win.set_default_size(1120, 760); self.win.set_size_request(720, 520)
         self.win.connect("key-press-event", self.key)
         header = Gtk.HeaderBar(title="Wallpapers", show_close_button=True)
         self.win.set_titlebar(header)
@@ -78,10 +82,10 @@ class App(Gtk.Application):
         self.search = Gtk.SearchEntry(placeholder_text="Search filenames…"); self.search.connect("search-changed", lambda *_: self.filter()); controls.pack_start(self.search, True, True, 0)
         self.filter_combo = Gtk.ComboBoxText(); [self.filter_combo.append_text(x) for x in ("All", "Favorites", "Recently Used")]
         self.filter_combo.set_active(0); self.filter_combo.connect("changed", lambda *_: self.filter()); controls.pack_start(self.filter_combo, False, False, 0)
+        self.color_combo = Gtk.ComboBoxText(); [self.color_combo.append_text(x) for x in ("Any color", "Red", "Orange", "Yellow", "Green", "Blue", "Purple", "Pink", "Light", "Dark", "Neutral")]
+        self.color_combo.set_active(0); self.color_combo.connect("changed", lambda *_: self.filter()); controls.pack_start(self.color_combo, False, False, 0)
         self.count = Gtk.Label(label="Scanning…"); self.count.get_style_context().add_class("muted"); controls.pack_end(self.count, False, False, 0)
-        carousel = Gtk.Box(spacing=10); root.pack_start(carousel, True, True, 0)
-        left = Gtk.Button.new_from_icon_name("go-previous-symbolic", Gtk.IconSize.DIALOG); left.connect("clicked", lambda *_: self.move(-1)); carousel.pack_start(left, False, False, 0)
-        self.prev = self.make_side(); carousel.pack_start(self.prev, True, True, 0)
+        carousel = Gtk.Overlay(); root.pack_start(carousel, True, True, 0)
         # Gtk.Stack gives us a cheap compositor-driven slide without a timer or
         # a per-frame redraw loop. Only two image widgets ever exist here.
         self.center = Gtk.EventBox(); self.center.connect("button-press-event", self.center_click)
@@ -91,14 +95,18 @@ class App(Gtk.Application):
             frame = Gtk.Frame(); frame.get_style_context().add_class("image-frame")
             image = Gtk.Image(); frame.add(image); self.stage.add_named(frame, slot); self.images.append(image)
         self.stage.set_visible_child_name("one"); self.image_slot = 0; self.image = self.images[0]
-        self.center.add(self.stage); carousel.pack_start(self.center, True, True, 0)
-        self.next = self.make_side(); carousel.pack_start(self.next, True, True, 0)
-        right = Gtk.Button.new_from_icon_name("go-next-symbolic", Gtk.IconSize.DIALOG); right.connect("clicked", lambda *_: self.move(1)); carousel.pack_start(right, False, False, 0)
+        self.center.add(self.stage); carousel.add(self.center)
+        arrows = Gtk.Box(spacing=8, halign=Gtk.Align.FILL, valign=Gtk.Align.CENTER, margin=16)
+        left = Gtk.Button.new_from_icon_name("go-previous-symbolic", Gtk.IconSize.DIALOG); left.connect("clicked", lambda *_: self.move(-1)); arrows.pack_start(left, False, False, 0)
+        spacer = Gtk.Box(); arrows.pack_start(spacer, True, True, 0)
+        right = Gtk.Button.new_from_icon_name("go-next-symbolic", Gtk.IconSize.DIALOG); right.connect("clicked", lambda *_: self.move(1)); arrows.pack_end(right, False, False, 0)
+        carousel.add_overlay(arrows)
         self.center.connect("scroll-event", self.scroll)
         self.name = Gtk.Label(ellipsize=3); self.name.get_style_context().add_class("muted"); root.pack_start(self.name, False, False, 0)
-        self.thumbbox = Gtk.Box(spacing=7); viewport = Gtk.ScrolledWindow(); viewport.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER); viewport.set_min_content_height(120); viewport.add(self.thumbbox); root.pack_start(viewport, False, True, 0)
+        self.thumbbox = Gtk.Box(spacing=6); self.thumbbox.get_style_context().add_class("thumb-rail"); viewport = Gtk.ScrolledWindow(); viewport.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER); viewport.set_min_content_height(78); viewport.set_max_content_height(78); viewport.add(self.thumbbox); root.pack_start(viewport, False, True, 0)
         bottom = Gtk.Box(spacing=8, halign=Gtk.Align.CENTER); root.pack_start(bottom, False, False, 0)
         self.favorite = Gtk.Button(label="☆ Favorite"); self.favorite.connect("clicked", lambda *_: self.toggle_favorite()); bottom.pack_start(self.favorite, False, False, 0)
+        random_apply = Gtk.Button(label="Random + Apply"); random_apply.connect("clicked", lambda *_: self.random_apply()); bottom.pack_start(random_apply, False, False, 0)
         apply = Gtk.Button(label="Set Wallpaper"); apply.get_style_context().add_class("suggested-action"); apply.connect("clicked", lambda *_: self.apply()); bottom.pack_start(apply, False, False, 0)
         self.win.show_all()
 
@@ -127,15 +135,41 @@ class App(Gtk.Application):
     def filter(self):
         old = self.current_path()
         text = self.search.get_text().casefold(); mode = self.filter_combo.get_active_text()
+        color = self.color_combo.get_active_text()
         source = self.all_files
         if mode == "Favorites": source = [x for x in source if x in self.favorites]
         elif mode == "Recently Used": source = [x for x in self.history if x in self.all_files]
-        self.files = [x for x in source if text in Path(x).name.casefold() and Path(x).is_file()]
+        self.files = [x for x in source if text in Path(x).name.casefold() and Path(x).is_file()
+                      and (color == "Any color" or self.color_for(x) == color)]
         self.index = self.files.index(old) if old in self.files else 0
         if self.settings["remember_position"] and self.settings["last_path"] in self.files: self.index = self.files.index(self.settings["last_path"])
         self.refresh()
 
     def current_path(self): return self.files[self.index] if self.files else None
+
+    def color_for(self, path):
+        """Return a deliberately broad, useful colour family for an image."""
+        try:
+            stat = os.stat(path); stamp = [stat.st_mtime_ns, stat.st_size]
+            saved = self.color_cache.get(path)
+            if saved and saved[:2] == stamp: return saved[2]
+            pix = GdkPixbuf.Pixbuf.new_from_file_at_scale(path, 1, 1, True)
+            pixels = pix.get_pixels(); channels = pix.get_n_channels()
+            r, g, b = (pixels[i] / 255 for i in range(3))
+            hue, sat, value = colorsys.rgb_to_hsv(r, g, b)
+            if sat < .13: label = "Light" if value > .72 else "Dark" if value < .30 else "Neutral"
+            elif value < .22: label = "Dark"
+            elif hue < .04 or hue >= .95: label = "Red"
+            elif hue < .10: label = "Orange"
+            elif hue < .18: label = "Yellow"
+            elif hue < .46: label = "Green"
+            elif hue < .70: label = "Blue"
+            elif hue < .82: label = "Purple"
+            else: label = "Pink"
+            self.color_cache[path] = [*stamp, label]; write_json("colors.json", self.color_cache)
+            return label
+        except Exception:
+            return "Neutral"
     def move(self, delta):
         if self.files:
             self.slide_direction = delta
@@ -151,7 +185,7 @@ class App(Gtk.Application):
                 if disk.exists(): pix = GdkPixbuf.Pixbuf.new_from_file(str(disk))
                 else:
                     THUMBS.mkdir(parents=True, exist_ok=True); pix = fit_pixbuf(path, size, size); pix.savev(str(disk), "png", [], [])
-            else: pix = fit_pixbuf(path, max(240, self.image.get_allocated_width()-24), max(180, self.image.get_allocated_height()-24))
+            else: pix = fit_pixbuf(path, size[0], size[1])
         except Exception: return None
         cache[key] = pix
         limits = {"Low": (20, 2), "Balanced": (36, 3), "High": (60, 5)}
@@ -170,7 +204,9 @@ class App(Gtk.Application):
         if not path:
             self.image.clear(); self.name.set_text("No supported images found in configured folders"); self.count.set_text("0 / 0"); return
         self.settings["last_path"] = path; self.save_settings()
-        pix = self.cached(path, 0)
+        stage_width = max(480, self.stage.get_allocated_width() - 32)
+        stage_height = max(320, self.stage.get_allocated_height() - 32)
+        pix = self.cached(path, (stage_width, stage_height))
         # Reusing the outgoing slot lets Gtk animate just the two nearby images.
         self.stage.set_transition_duration(200 if self.settings["animation"] else 0)
         self.stage.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT if self.slide_direction >= 0 else Gtk.StackTransitionType.SLIDE_RIGHT)
@@ -179,15 +215,16 @@ class App(Gtk.Application):
         self.stage.set_visible_child_name(("one", "two")[self.image_slot])
         self.name.set_text(Path(path).name + ("  (could not load)" if not pix else "")); self.count.set_text(f"{self.index + 1} / {len(self.files)}")
         self.favorite.set_label("★ Favorite" if path in self.favorites else "☆ Favorite")
-        for box, offset in ((self.prev, -1), (self.next, 1)):
-            other = self.files[(self.index+offset) % len(self.files)] if len(self.files) > 1 else None
-            p = self.cached(other, 140, True) if other else None; box.preview_image.set_from_pixbuf(p) if p else box.preview_image.clear(); box.preview_label.set_text(Path(other).name if other else "")
-        start = max(0, self.index-5); end = min(len(self.files), start+11)
+        start = max(0, self.index-8); end = min(len(self.files), start+17)
         for i in range(start, end):
-            button = Gtk.Button(); thumb = self.cached(self.files[i], int(self.settings["thumbnail_size"]), True); button.set_image(Gtk.Image.new_from_pixbuf(thumb) if thumb else Gtk.Image()); button.set_tooltip_text(Path(self.files[i]).name); button.connect("clicked", lambda _b, n=i: self.select(n)); self.thumbbox.pack_start(button, False, False, 0)
+            button = Gtk.Button(); button.get_style_context().add_class("selected-thumb") if i == self.index else None
+            thumb = self.cached(self.files[i], 70, True); button.set_image(Gtk.Image.new_from_pixbuf(thumb) if thumb else Gtk.Image()); button.set_tooltip_text(Path(self.files[i]).name); button.connect("clicked", lambda _b, n=i: self.select(n)); self.thumbbox.pack_start(button, False, False, 0)
         self.thumbbox.show_all()
 
     def select(self, n): self.slide_direction = 1 if n >= self.index else -1; self.index = n; self.refresh()
+    def random_apply(self):
+        if not self.files: return
+        self.index = random.randrange(len(self.files)); self.slide_direction = 1; self.refresh(); self.apply()
     def center_click(self, _w, event):
         if event.type == Gdk.EventType._2BUTTON_PRESS and self.settings["apply_on_double_click"]: self.apply()
         return True
